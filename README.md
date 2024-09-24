@@ -2,9 +2,7 @@
 
 Listen to free internet radio in your Gnome desktop
 
-## Install prerequisites ()
-
-## 
+## Install
 
 ```bash
 git clone 'http://github.com/breakcorn/breakcorn-radio-gnome-shell-extension' && cd ./breakcorn-radio-gnome-shell-extension # Clone the repository and change the directory
