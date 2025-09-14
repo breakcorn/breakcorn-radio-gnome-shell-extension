@@ -123,6 +123,52 @@ const BreakcornRadioPopup = GObject.registerClass(
             this.box.add_child(this.err);
         }
 
+        setReconnecting(attempt, maxAttempts) {
+            this.setError(false);
+            this.setLoading(false);
+            
+            if (this.reconnectingLabel == null) {
+                this.reconnectingLabel = new St.Label({
+                    text: `Переподключение... (${attempt}/${maxAttempts})`,
+                    x_align: Clutter.ActorAlign.CENTER,
+                    x_expand: true,
+                    style: "color: orange; padding: 5px;"
+                });
+                
+                // Add cancel button
+                this.reconnectCancelBtn = new St.Button({
+                    label: "Отменить",
+                    style_class: "button",
+                    x_align: Clutter.ActorAlign.CENTER
+                });
+                
+                this.reconnectCancelBtn.connect('clicked', () => {
+                    this.player.cancelReconnection();
+                    this.clearReconnecting();
+                });
+                
+                this.reconnectBox = new St.BoxLayout({
+                    vertical: true,
+                    x_align: Clutter.ActorAlign.CENTER
+                });
+                
+                this.reconnectBox.add_child(this.reconnectingLabel);
+                this.reconnectBox.add_child(this.reconnectCancelBtn);
+                this.box.add_child(this.reconnectBox);
+            } else {
+                this.reconnectingLabel.set_text(`Переподключение... (${attempt}/${maxAttempts})`);
+            }
+        }
+        
+        clearReconnecting() {
+            if (this.reconnectBox != null) {
+                this.reconnectBox.destroy();
+                this.reconnectBox = null;
+                this.reconnectingLabel = null;
+                this.reconnectCancelBtn = null;
+            }
+        }
+
         createUi() {
             this.spinner = new Animation.Spinner(16);
             this.loadtxt = new St.Label({
@@ -131,10 +177,42 @@ const BreakcornRadioPopup = GObject.registerClass(
             this.loadtxt.hide();
 
             this.controlbtns = new Radio.ControlButtons(this.player, this);
+
+            // Setup reconnection callbacks
             this.player.setOnError(() => {
+                this.clearReconnecting();
                 this.setError(false);
                 this.setError(true);
             });
+
+            this.player.setOnStateChanged((state) => {
+                switch (state) {
+                    case 'playing':
+                        this.clearReconnecting();
+                        this.setError(false);
+                        this.setLoading(false);
+                        break;
+                    case 'connecting':
+                        this.clearReconnecting();
+                        this.setError(false);
+                        this.setLoading(true);
+                        break;
+                    case 'stopped':
+                        this.clearReconnecting();
+                        this.setError(false);
+                        this.setLoading(false);
+                        break;
+                }
+            });
+            
+            this.player.setOnReconnectionStarted((attempt, maxAttempts) => {
+                this.setReconnecting(attempt, maxAttempts);
+            });
+            
+            this.player.setOnReconnectionAttempt((attempt, maxAttempts) => {
+                this.setReconnecting(attempt, maxAttempts);
+            });
+
 
             this.box.add_child(this.controlbtns);
 
@@ -223,6 +301,7 @@ const BreakcornRadioPopup = GObject.registerClass(
             this.controlbtns.icon.set_icon_name("media-playback-start-symbolic");
             this.controlbtns.playing = false;
             this.setLoading(false);
+            this.clearReconnecting();
             this.desc.set_text("Breakcorn Radio");
         }
 

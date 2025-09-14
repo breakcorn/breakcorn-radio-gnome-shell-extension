@@ -1,6 +1,12 @@
- {
-    "lastChannel":0,
-    "favs":[],
-    "lastVol" : 0.5 
- }
+{
+  "lastChannel": 0,
+  "favs": [],
+  "lastVol": 0.5,
+  "reconnection": {
+     "enabled": true,
+     "maxAttempts": 5,
+     "baseDelay": 1000,
+     "maxDelay": 15000
+  }
+}
  

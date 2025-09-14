@@ -14,6 +14,12 @@ export function load() {
     lastChannel: 0,
     favs: [],
     lastVol: 0.5,
+    reconnection: {
+      enabled: true,
+      maxAttempts: 5,
+      baseDelay: 1000,
+      maxDelay: 15000
+    }
   };
 
   create(dir_path);
@@ -34,6 +40,15 @@ export function load() {
     return defaultData;
   }
   return channelList;
+}
+export function getReconnectionSettings() {
+  const data = load();
+  return data.reconnection || {
+    enabled: true,
+    maxAttempts: 5,
+    baseDelay: 1000,
+    maxDelay: 15000
+  };
 }
 
 export function getLastChannel() {
@@ -75,11 +90,12 @@ export function create(dir_path) {
   }
 }
 
-export function save(lastChannel, lastVol, favs) {
+export function save(lastChannel, lastVol, favs, reconnectionSettings = null) {
   let filepath = GLib.get_home_dir() + "/" + DIR_NAME + "/" + FILE_NAME;
   let file = Gio.file_new_for_path(filepath);
   let raw = file.replace(null, false, Gio.FileCreateFlags.NONE, null);
   let out = Gio.BufferedOutputStream.new_sized(raw, 4096);
+  const currentData = load();
   const saveData = {
     lastChannel: lastChannel ? lastChannel.getNum() : 0,
     favs: Array.isArray(favs) ? favs : [],
@@ -87,6 +103,12 @@ export function save(lastChannel, lastVol, favs) {
       typeof lastVol === "number" && isFinite(lastVol)
         ? lastVol.toFixed(2)
         : 0.5,
+    reconnection: reconnectionSettings || currentData.reconnection || {
+      enabled: true,
+      maxAttempts: 5,
+      baseDelay: 1000,
+      maxDelay: 15000
+    }
   };
   Shell.write_string_to_stream(out, JSON.stringify(saveData, null, 4));
   out.close(null);

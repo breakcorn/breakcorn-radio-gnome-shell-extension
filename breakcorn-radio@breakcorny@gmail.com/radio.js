@@ -8,9 +8,20 @@ import St from "gi://St";
 import Clutter from "gi://Clutter";
 
 import * as Channels from "./channels.js";
+import * as Data from "./data.js";
+import GLib from "gi://GLib";
 
 const DEFAULT_VOLUME = 0.5;
 const CLIENT_NAME = "breakcorn-radio";
+
+// Connection states
+const ConnectionState = {
+    STOPPED: 'stopped',
+    CONNECTING: 'connecting', 
+    PLAYING: 'playing',
+    RECONNECTING: 'reconnecting',
+    ERROR: 'error'
+};
 
 export const ControlButtons = GObject.registerClass(
     {
@@ -99,6 +110,13 @@ export const RadioPlayer = class RadioPlayer {
         this.setVolume(DEFAULT_VOLUME);
         this.tag = "Breakcorn Radio";
 
+        // Connection state and reconnection
+        this.connectionState = ConnectionState.STOPPED;
+        this.reconnectionAttempts = 0;
+        this.maxReconnectionAttempts = 5;
+        this.reconnectionTimer = null;
+        this.userStopped = false; // Flag to distinguish user stop from error
+
         let bus = this.playbin.get_bus();
         bus.add_signal_watch();
         bus.connect("message", (bus, msg) => {
@@ -109,6 +127,9 @@ export const RadioPlayer = class RadioPlayer {
     }
 
     play() {
+        this.userStopped = false;
+        this._cancelReconnection();
+        this._setState(ConnectionState.CONNECTING);
         this.playbin.set_state(Gst.State.PLAYING);
         this.playing = true;
     }
@@ -145,6 +166,8 @@ export const RadioPlayer = class RadioPlayer {
 
     setChannel(ch) {
         this.channel = ch;
+        this._cancelReconnection();
+        this.reconnectionAttempts = 0;
         this.stop();
         this.playbin.set_property("uri", ch.getLink());
         this.play();
@@ -167,6 +190,43 @@ export const RadioPlayer = class RadioPlayer {
         return this.tag;
     }
 
+    
+    getConnectionState() {
+        return this.connectionState;
+    }
+    
+    getReconnectionAttempts() {
+        return this.reconnectionAttempts;
+    }
+    
+    getMaxReconnectionAttempts() {
+        return this.maxReconnectionAttempts;
+    }
+    
+    cancelReconnection() {
+        this._cancelReconnection();
+        if (this.connectionState === ConnectionState.RECONNECTING) {
+            this._setState(ConnectionState.ERROR);
+        }
+    }
+    
+    // Callbacks setters
+    setOnStateChanged(callback) {
+        this.onStateChanged = callback;
+    }
+    
+    setOnReconnectionStarted(callback) {
+        this.onReconnectionStarted = callback;
+    }
+    
+    setOnReconnectionAttempt(callback) {
+        this.onReconnectionAttempt = callback;
+    }
+    
+    setOnReconnectionFailed(callback) {
+        this.onReconnectionFailed = callback;
+    }
+
     _onMessageReceived(msg) {
         switch (msg.type) {
             case Gst.MessageType.TAG:
@@ -178,17 +238,92 @@ export const RadioPlayer = class RadioPlayer {
                 break;
 
             case Gst.MessageType.STREAM_START:
+                this._setState(ConnectionState.PLAYING);
+                this.reconnectionAttempts = 0; // Reset attempts on successful connection
                 if (this.onTagChanged != null) this.onTagChanged();
                 break;
 
             // Both should do the same thing
             case Gst.MessageType.EOS:
             case Gst.MessageType.ERROR:
-                this.stop();
-                if (this.onError != null) this.onError();
+                if (!this.userStopped) {
+                    this._handleConnectionError();
+                } else {
+                    this.stop();
+                    if (this.onError != null) this.onError();
+                }
                 break;
             default:
                 break;
+        }
+    }
+    
+    _loadReconnectionSettings() {
+        const settings = Data.getReconnectionSettings();
+        this.reconnectionEnabled = settings.enabled;
+        this.maxReconnectionAttempts = settings.maxAttempts;
+        this.baseReconnectionDelay = settings.baseDelay;
+        this.maxReconnectionDelay = settings.maxDelay;
+    }
+    
+    _setState(newState) {
+        if (this.connectionState !== newState) {
+            this.connectionState = newState;
+            if (this.onStateChanged != null) {
+                this.onStateChanged(newState);
+            }
+        }
+    }
+    
+    _handleConnectionError() {
+        this.playbin.set_state(Gst.State.NULL);
+        this.playing = false;
+        
+        if (this.reconnectionEnabled && this.reconnectionAttempts < this.maxReconnectionAttempts) {
+            this._startReconnection();
+        } else {
+            this._setState(ConnectionState.ERROR);
+            if (this.onError != null) this.onError();
+        }
+    }
+    
+    _startReconnection() {
+        this._setState(ConnectionState.RECONNECTING);
+        this.reconnectionAttempts++;
+        
+        if (this.onReconnectionStarted != null) {
+            this.onReconnectionStarted(this.reconnectionAttempts, this.maxReconnectionAttempts);
+        }
+        
+        // Calculate delay with exponential backoff
+        const delay = Math.min(
+            this.baseReconnectionDelay * Math.pow(2, this.reconnectionAttempts - 1),
+            this.maxReconnectionDelay
+        );
+        
+        this.reconnectionTimer = GLib.timeout_add(GLib.PRIORITY_DEFAULT, delay, () => {
+            this._attemptReconnection();
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+    
+    _attemptReconnection() {
+        if (this.onReconnectionAttempt != null) {
+            this.onReconnectionAttempt(this.reconnectionAttempts, this.maxReconnectionAttempts);
+        }
+        
+        // Try to reconnect
+        this.playbin.set_property("uri", this.channel.getLink());
+        this.playbin.set_state(Gst.State.PLAYING);
+        this.playing = true;
+        
+        this.reconnectionTimer = null;
+    }
+    
+    _cancelReconnection() {
+        if (this.reconnectionTimer != null) {
+            GLib.source_remove(this.reconnectionTimer);
+            this.reconnectionTimer = null;
         }
     }
 };
