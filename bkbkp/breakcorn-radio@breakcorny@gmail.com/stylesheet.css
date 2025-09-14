@@ -1,0 +1,9 @@
+.breakcorn-popup-sub-menu {
+  width: 250px;
+  max-width: 250px;
+}
+
+StBoxLayout.breakcorn-popup-loading-box {
+  spacing: 0.4em;
+  margin-top: 0.5em;
+}
